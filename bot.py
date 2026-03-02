@@ -2646,10 +2646,7 @@ async def totalusers_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Create fancy message with premium emojis
     text = (
         f"{fmt_emoji('group', '👥')} <b>Total Users</b>\n\n"
-        f"This bot currently has <b>{total_users}</b> users {fmt_emoji('rocket', '🚀')}\n\n"
-        f"{fmt_emoji('chart', '📊')} <b>Additional Stats:</b>\n"
-        f"• Total accounts in pool: <b>{total_accounts}</b>\n"
-        f"• Average accounts per user: <b>{total_accounts/total_users:.1f}</b>"
+        f"This bot currently has <b>{total_users}</b> users {fmt_emoji('rocket', '🚀')}"
     )
     
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
