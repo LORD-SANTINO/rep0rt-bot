@@ -2634,6 +2634,26 @@ async def list_feedback_command(update: Update, context: ContextTypes.DEFAULT_TY
 
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
+async def totalusers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show total number of users who have ever started the bot."""
+    
+    # Get total users count from database
+    total_users = len(get_all_user_ids())
+    
+    # Calculate additional stats (optional)
+    total_accounts = count_all_accounts()
+    
+    # Create fancy message with premium emojis
+    text = (
+        f"{fmt_emoji('group', '👥')} <b>Total Users</b>\n\n"
+        f"This bot currently has <b>{total_users}</b> users {fmt_emoji('rocket', '🚀')}\n\n"
+        f"{fmt_emoji('chart', '📊')} <b>Additional Stats:</b>\n"
+        f"• Total accounts in pool: <b>{total_accounts}</b>\n"
+        f"• Average accounts per user: <b>{total_accounts/total_users:.1f}</b>"
+    )
+    
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
 from telegram import BotCommand
 async def set_commands(app):
     """Set bot commands for the command menu."""
@@ -2672,6 +2692,7 @@ def main():
     application.add_handler(CallbackQueryHandler(back_to_start_callback, pattern="^back_to_start$"))
     application.add_handler(CommandHandler("addsessions", add_sessions_command))
     application.add_handler(CommandHandler("bot_status", bot_status_command))
+    application.add_handler(CommandHandler("totalusers", totalusers_command))
     application.add_handler(CallbackQueryHandler(status_refresh_callback, pattern="^status_refresh$"))
 
     # Add account conversation
