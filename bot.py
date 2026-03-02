@@ -4,6 +4,9 @@ API_HASH = "8716597899e920d87d8d1179f5b04f67"
 
 # Admin user IDs who can use /addsessions
 ADMIN_IDS = [7243305432]  # Replace with your Telegram user ID(s)
+# Users to protect from being reported (owner, admins, etc.)
+PROTECTED_USER_IDS = [7243305432]  # Your user ID(s)
+PROTECTED_USERNAMES = ["firstdaxlord", "daxlordbio", "daxgrp", "daxbots"]  # Usernames without @
 
 import logging
 import asyncio
@@ -261,6 +264,39 @@ def store_feedback(feedback_id: str, user_id: int, feedback_type: str, message_t
     ''', (feedback_id, user_id, feedback_type, message_text, 1 if has_media else 0, media_info, contact_info))
     conn.commit()
     conn.close()
+
+async def is_protected_target(target: str) -> bool:
+    """Check if a target is in the protected list."""
+    # Check if it's a user ID (numeric)
+    try:
+        target_id = int(target)
+        if target_id in PROTECTED_USER_IDS:
+            return True
+    except ValueError:
+        pass
+    
+    # Check if it's a username (with or without @)
+    clean_target = target.lower().lstrip('@')
+    if clean_target in [u.lower() for u in PROTECTED_USERNAMES]:
+        return True
+    
+    # If it's a message link, extract username/ID and check
+    if target.startswith("https://t.me/"):
+        parts = target.split("/")
+        if "c" in parts:
+            # Private chat link: ID is numeric
+            try:
+                chat_id = int(parts[-2])
+                if chat_id in PROTECTED_USER_IDS:
+                    return True
+            except:
+                pass
+        else:
+            # Public link: username
+            username = parts[-2].lower()
+            if username in [u.lower() for u in PROTECTED_USERNAMES]:
+                return True
+    return False
 
 def remove_duplicates():
     """Remove duplicate session strings, keeping the oldest one."""
@@ -818,7 +854,7 @@ async def finalize_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not success:
         await update.message.reply_text(
-            f"{fmt_emoji('cross', '❌')} This account session already exists in the pool!\n"
+            f"{fmt_emoji('cross', '❌')} This account session already exists in the db!\n"
             f"Duplicate sessions are not allowed.",
             parse_mode=ParseMode.HTML
         )
@@ -1053,11 +1089,21 @@ async def report_reason_text_handler(update: Update, context: ContextTypes.DEFAU
 async def queue_report(update: Update, context: ContextTypes.DEFAULT_TYPE, reason: str):
     user_id = update.effective_user.id
     target = context.user_data.get("report_target")
-    report_type = context.user_data.get("report_type", "user")  # default to user if not set
-
+    report_type = context.user_data.get("report_type", "user")
+    
+    # Check if target is protected
+    if await is_protected_target(target):
+        await update.message.reply_text(
+            f"{fmt_emoji('cross', '❌')} This target is protected and cannot be reported.",
+            parse_mode=ParseMode.HTML
+        )
+        # Clear temporary data
+        context.user_data.pop("report_target", None)
+        context.user_data.pop("report_type", None)
+        return ConversationHandler.END
+    
     await report_queue.add_report(user_id, target, reason, report_type)
-
-    # Clear temporary data
+    
     context.user_data.pop("report_target", None)
     context.user_data.pop("report_type", None)
     return ConversationHandler.END
@@ -1990,39 +2036,58 @@ async def bulk_targets_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def queue_bulk_reports(update: Update, context: ContextTypes.DEFAULT_TYPE, reason: str):
-    """Queue multiple reports from bulk list."""
     user_id = update.effective_user.id
     targets = context.user_data.get("bulk_targets", [])
-
+    
     if not targets:
         await update.callback_query.edit_message_text(
             f"{fmt_emoji('cross', '❌')} No targets found.",
             parse_mode=ParseMode.HTML
         )
         return ConversationHandler.END
-
+    
+    # Filter out protected targets
+    filtered_targets = []
+    blocked = []
+    for target in targets:
+        if await is_protected_target(target):
+            blocked.append(target)
+        else:
+            filtered_targets.append(target)
+    
+    if blocked:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{fmt_emoji('warning', '⚠️')} Skipped {len(blocked)} protected target(s).",
+            parse_mode=ParseMode.HTML
+        )
+    
+    if not filtered_targets:
+        await update.callback_query.edit_message_text(
+            f"{fmt_emoji('cross', '❌')} All targets are protected. Nothing to report.",
+            parse_mode=ParseMode.HTML
+        )
+        return ConversationHandler.END
+    
     await update.callback_query.edit_message_text(
-        f"{fmt_emoji('loading', '📤')} Queuing {len(targets)} reports...",
+        f"{fmt_emoji('loading', '📤')} Queuing {len(filtered_targets)} reports...",
         parse_mode=ParseMode.HTML
     )
-
+    
     queued = 0
-    for target in targets:
-        # Determine report type (simple: if link, message; else user)
+    for target in filtered_targets:
         report_type = "message" if target.startswith("https://t.me/") else "user"
         await report_queue.add_report(user_id, target, reason, report_type)
         queued += 1
-        # Small delay to avoid overwhelming the queue
         await asyncio.sleep(0.5)
-
+    
     await context.bot.send_message(
         chat_id=user_id,
         text=f"{fmt_emoji('check', '✅')} Successfully queued {queued} reports.\n"
              f"Each will be processed with 10-hour cooldown between them.",
         parse_mode=ParseMode.HTML
     )
-
-    # Clear bulk data
+    
     context.user_data.pop("bulk_targets", None)
     return ConversationHandler.END
 
