@@ -73,6 +73,22 @@ EMOJI = {
     "refresh": "5452002073606384268",
 }
 
+# Feedback conversation states
+FEEDBACK_TYPE, FEEDBACK_TEXT, FEEDBACK_CONTACT, FEEDBACK_CONFIRM = range(20, 24)
+
+# Feedback types with emojis
+FEEDBACK_TYPES = {
+    "bug": {"emoji": "🐛", "name": "Bug Report", "color": "🔴"},
+    "suggestion": {"emoji": "💡", "name": "Suggestion", "color": "💡"},
+    "feature": {"emoji": "✨", "name": "Feature Request", "color": "✨"},
+    "complaint": {"emoji": "😤", "name": "Complaint", "color": "😤"},
+    "praise": {"emoji": "🌟", "name": "Praise", "color": "🌟"},
+    "other": {"emoji": "📝", "name": "Other", "color": "📝"}
+}
+
+# Feedback log channel ID (optional - set to None if not using)
+FEEDBACK_LOG_CHANNEL = -1003129289366  # Replace with @channel ID or chat ID to log feedback publicly
+
 def fmt_emoji(name: str, fallback: str = "") -> str:
     if not fallback:
         fallback = "•"
@@ -186,6 +202,63 @@ def init_db():
 
     c.execute('CREATE INDEX IF NOT EXISTS idx_user_id ON accounts(user_id)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_session_string ON accounts(session_string)')
+
+    c.execute('''
+              CREATE TABLE IF NOT EXISTS feedback
+              (
+                  id
+                  TEXT
+                  PRIMARY
+                  KEY,
+                  user_id
+                  INTEGER
+                  NOT
+                  NULL,
+                  feedback_type
+                  TEXT
+                  NOT
+                  NULL,
+                  message_text
+                  TEXT
+                  NOT
+                  NULL,
+                  has_media
+                  INTEGER
+                  DEFAULT
+                  0,
+                  media_info
+                  TEXT,
+                  contact_info
+                  TEXT,
+                  status
+                  TEXT
+                  DEFAULT
+                  'new',
+                  created_at
+                  TIMESTAMP
+                  DEFAULT
+                  CURRENT_TIMESTAMP,
+                  replied_at
+                  TIMESTAMP,
+                  reply_message
+                  TEXT
+              )
+              ''')
+
+    c.execute('CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(user_id)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status)')
+
+    conn.commit()
+    conn.close()
+
+def store_feedback(feedback_id: str, user_id: int, feedback_type: str, message_text: str,
+                   has_media: bool = False, media_info: str = "", contact_info: str = ""):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO feedback (id, user_id, feedback_type, message_text, has_media, media_info, contact_info)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (feedback_id, user_id, feedback_type, message_text, 1 if has_media else 0, media_info, contact_info))
     conn.commit()
     conn.close()
 
@@ -755,7 +828,7 @@ async def finalize_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"{fmt_emoji('check', '✅')} Account successfully added {fmt_emoji('add', '✅')}!\n"
         f"Now all you need to do is type /start and navigate to 'Report Entity' {fmt_emoji('lol', '🥲')}\n"
-        f"Total accounts in pool: {total}",
+        f"Total accounts available: {total}",
         parse_mode=ParseMode.HTML
     )
     return ConversationHandler.END
@@ -834,7 +907,7 @@ async def delete_account_callback(update: Update, context: ContextTypes.DEFAULT_
     if orphan_account(account_id, user_id):
         await query.edit_message_text(
             f"{fmt_emoji('check', '✅')} Account removed from your list.\n"
-            f"It will continue to be used in the global reporting pool.",
+            f"",
             parse_mode=ParseMode.HTML
         )
     else:
@@ -1135,35 +1208,36 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ),
 
         "help_commands": (
-            f"{fmt_emoji('gear', '📋')} <b>Commands List</b>\n\n"
-            f"<b>Main Commands:</b>\n"
-            f"<b>/start</b> - Main menu\n"
-            f"<b>/help</b> - This help system\n"
-            f"<b>/cancel</b> - Cancel current operation\n"
-            f"<b>/stats</b> - View bot statistics\n"
-            f"<b>/bot_status</b> - Detailed bot status (uptime, memory, queue)\n\n"
+            f"📋 <b>Commands List</b>\n\n"
 
-            f"<b>Account Management:</b>\n"
-            f"<b>/addsessions</b> - Add session manually (admin only)\n"
-            f"<b>/check_account</b> - Check if account is deleted/frozen\n"
-            f"<b>/account_info</b> - Get detailed account info\n\n"
+            f"⭐ <b>Main Commands:</b>\n"
+            f"• 🚀 /start - Main menu\n"
+            f"• 📖 /help - This help system\n"
+            f"• ❌ /cancel - Cancel current operation\n"
+            f"• 📊 /stats - View bot statistics\n"
+            f"• 📊 /bot_status - Detailed bot status (uptime, memory, queue)\n\n"
 
-            f"<b>Reporting:</b>\n"
-            f"<b>/bulk_report</b> - Report multiple targets at once\n\n"
+            f"⚙️ <b>Account Management:</b>\n"
+            f"• ➕ /addsessions - Add session manually (admin only)\n"
+            f"• 🔍 /check_account - Check if account is deleted/frozen\n"
+            f"• 📄 /account_info - Get detailed account info\n\n"
 
-            f"<b>Group Moderation:</b>\n"
-            f"<b>/ban</b> - Ban user (group admins only)\n"
-            f"<b>/unban</b> - Unban user (group admins only)\n\n"
+            f"🚨 <b>Reporting:</b>\n"
+            f"• 📑 /bulk_report - Report multiple targets at once\n\n"
 
-            f"<b>Admin Only:</b>\n"
-            f"<b>/broadcast</b> - Broadcast message to all users\n"
-            f"<b>/addsessions</b> - Add session strings manually\n\n"
+            f"👥 <b>Group Moderation:</b>\n"
+            f"• 🔨 /ban - Ban user (group admins only)\n"
+            f"• ✅ /unban - Unban user (group admins only)\n\n"
 
-            f"<b>Buttons:</b>\n"
-            f"• Add Account ➕\n"
-            f"• Report Entity 🚨\n"
-            f"• Manage Accounts 🔑\n"
-            f"• Help topics in this menu"
+            f"🔒 <b>Admin Only:</b>\n"
+            f"• 📢 /broadcast - Broadcast message to all users\n"
+            f"• ➕ /addsessions - Add session strings manually\n\n"
+
+            f"🔑 <b>Buttons:</b>\n"
+            f"• ➕ Add Account\n"
+            f"• 🚨 Report Entity\n"
+            f"• 🔑 Manage Accounts\n"
+            f"• 📋 Help topics in this menu"
         ),
 
         "help_stats": (
@@ -1384,7 +1458,7 @@ async def add_sessions_command(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(
         f"{fmt_emoji('check', '✅')} Session added successfully!\n"
         f"This session is now unique in the database.\n"
-        f"Total accounts in pool: {total}",
+        f"Total accounts: {total}",
         parse_mode=ParseMode.HTML
     )
 
@@ -1743,7 +1817,7 @@ async def account_info_command(update: Update, context: ContextTypes.DEFAULT_TYP
     args = context.args
     if not args:
         await update.message.reply_text(
-            f"{fmt_emoji('cross', '❌')} Usage: /account_info &lt;username or user_id&gt;",
+            f"{fmt_emoji('cross', '❌')} Usage: /account_info username or user_id",
             parse_mode=ParseMode.HTML
         )
         return
@@ -2068,6 +2142,450 @@ async def status_refresh_callback(update: Update, context: ContextTypes.DEFAULT_
     await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 
+async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start feedback collection process."""
+    user_id = update.effective_user.id
+    update_user_activity(user_id)
+
+    # Create feedback type selection keyboard
+    keyboard = []
+    row = []
+    for i, (key, value) in enumerate(FEEDBACK_TYPES.items()):
+        button = InlineKeyboardButton(
+            f"{value['emoji']} {value['name']}",
+            callback_data=f"fb_type_{key}"
+        )
+        row.append(button)
+        if (i + 1) % 2 == 0:  # 2 buttons per row
+            keyboard.append(row)
+            row = []
+    if row:  # Add any remaining buttons
+        keyboard.append(row)
+
+    # Add cancel button
+    keyboard.append([InlineKeyboardButton(f"❌ Cancel", callback_data="fb_cancel")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        f"{fmt_emoji('star', '📝')} <b>Feedback & Support</b>\n\n"
+        f"Please select the type of feedback you'd like to submit:",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
+    )
+    return FEEDBACK_TYPE
+
+
+async def feedback_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle feedback type selection."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "fb_cancel":
+        await query.edit_message_text(
+            f"{fmt_emoji('cross', '❌')} Feedback cancelled.",
+            parse_mode=ParseMode.HTML
+        )
+        return ConversationHandler.END
+
+    feedback_type = query.data.replace("fb_type_", "")
+    context.user_data["feedback_type"] = feedback_type
+    type_info = FEEDBACK_TYPES[feedback_type]
+
+    await query.edit_message_text(
+        f"{type_info['emoji']} <b>{type_info['name']}</b>\n\n"
+        f"Please describe your {type_info['name'].lower()} in detail.\n"
+        f"You can also attach screenshots or files if needed.\n\n"
+        f"<i>Send /cancel to abort.</i>",
+        parse_mode=ParseMode.HTML
+    )
+    return FEEDBACK_TEXT
+
+
+async def feedback_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle feedback text and optional attachments."""
+    # Store the message ID for possible attachment
+    context.user_data["feedback_message_id"] = update.message.message_id
+    context.user_data["feedback_chat_id"] = update.effective_chat.id
+
+    feedback_text = update.message.text or update.message.caption or ""
+    context.user_data["feedback_text"] = feedback_text
+
+    # Check if message has media
+    has_media = any([
+        update.message.photo,
+        update.message.video,
+        update.message.document,
+        update.message.audio,
+        update.message.voice,
+        update.message.sticker
+    ])
+
+    if has_media:
+        context.user_data["feedback_has_media"] = True
+
+        # Store media info
+        if update.message.photo:
+            context.user_data["feedback_media"] = update.message.photo[-1].file_id
+            context.user_data["feedback_media_type"] = "photo"
+        elif update.message.video:
+            context.user_data["feedback_media"] = update.message.video.file_id
+            context.user_data["feedback_media_type"] = "video"
+        elif update.message.document:
+            context.user_data["feedback_media"] = update.message.document.file_id
+            context.user_data["feedback_media_type"] = "document"
+            context.user_data["feedback_media_name"] = update.message.document.file_name
+        elif update.message.audio:
+            context.user_data["feedback_media"] = update.message.audio.file_id
+            context.user_data["feedback_media_type"] = "audio"
+        elif update.message.voice:
+            context.user_data["feedback_media"] = update.message.voice.file_id
+            context.user_data["feedback_media_type"] = "voice"
+        elif update.message.sticker:
+            context.user_data["feedback_media"] = update.message.sticker.file_id
+            context.user_data["feedback_media_type"] = "sticker"
+
+    # Ask if user wants to provide contact info
+    keyboard = [
+        [InlineKeyboardButton(f"✅ Yes, include my contact", callback_data="fb_contact_yes")],
+        [InlineKeyboardButton(f"❌ No, stay anonymous", callback_data="fb_contact_no")],
+        [InlineKeyboardButton(f"◀️ Go back", callback_data="fb_back")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        f"{fmt_emoji('star', '📝')} <b>Feedback Received</b>\n\n"
+        f"Would you like to include your contact information so we can reach out if needed?",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
+    )
+    return FEEDBACK_CONTACT
+
+
+async def feedback_contact_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle contact information preference."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "fb_back":
+        # Go back to feedback type selection
+        return await feedback_command(update, context)
+
+    if query.data == "fb_contact_yes":
+        # Get user info
+        user = update.effective_user
+        contact_info = (
+            f"User ID: <code>{user.id}</code>\n"
+            f"Username: @{user.username if user.username else 'None'}\n"
+            f"Name: {escape(user.first_name)} {escape(user.last_name or '')}"
+        )
+        context.user_data["feedback_contact"] = contact_info
+    else:
+        context.user_data["feedback_contact"] = "Anonymous"
+
+    # Show confirmation
+    feedback_type = context.user_data["feedback_type"]
+    type_info = FEEDBACK_TYPES[feedback_type]
+    feedback_text = context.user_data["feedback_text"]
+    has_media = context.user_data.get("feedback_has_media", False)
+
+    summary = (
+        f"{type_info['emoji']} <b>Feedback Summary</b>\n\n"
+        f"<b>Type:</b> {type_info['name']}\n"
+        f"<b>Message:</b> {escape(feedback_text[:100])}{'...' if len(feedback_text) > 100 else ''}\n"
+        f"<b>Attachments:</b> {'✅ Yes' if has_media else '❌ No'}\n"
+        f"<b>Contact:</b> {context.user_data['feedback_contact']}\n\n"
+        f"<i>Send this feedback?</i>"
+    )
+
+    keyboard = [
+        [InlineKeyboardButton(f"✅ Send Feedback", callback_data="fb_submit")],
+        [InlineKeyboardButton(f"❌ Cancel", callback_data="fb_cancel")],
+        [InlineKeyboardButton(f"◀️ Edit", callback_data="fb_edit")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        summary,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
+    )
+    return FEEDBACK_CONFIRM
+
+
+async def feedback_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Submit the feedback to admin."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "fb_cancel":
+        await query.edit_message_text(
+            f"{fmt_emoji('cross', '❌')} Feedback cancelled.",
+            parse_mode=ParseMode.HTML
+        )
+        return ConversationHandler.END
+
+    if query.data == "fb_edit":
+        # Go back to feedback text input
+        await query.edit_message_text(
+            f"{fmt_emoji('star', '📝')} Please send your feedback again:",
+            parse_mode=ParseMode.HTML
+        )
+        return FEEDBACK_TEXT
+
+    # Get all feedback data with safe defaults
+    user = update.effective_user
+    feedback_type = context.user_data.get("feedback_type", "other")
+    type_info = FEEDBACK_TYPES.get(feedback_type, FEEDBACK_TYPES["other"])
+    feedback_text = context.user_data.get("feedback_text", "No message provided")
+    contact = context.user_data.get("feedback_contact", "Anonymous")
+    has_media = context.user_data.get("feedback_has_media", False)
+
+    # Safely get optional data
+    feedback_chat_id = context.user_data.get("feedback_chat_id")
+    feedback_message_id = context.user_data.get("feedback_message_id")
+    feedback_media = context.user_data.get("feedback_media", "")
+
+    # Create feedback ID
+    feedback_id = f"FB-{int(time.time())}-{user.id}"
+
+    # Prepare feedback message for admin
+    admin_message = (
+        f"{type_info['emoji']} <b>New Feedback [{feedback_id}]</b>\n\n"
+        f"<b>From:</b> {escape(user.first_name)} {escape(user.last_name or '')}\n"
+        f"<b>User ID:</b> <code>{user.id}</code>\n"
+        f"<b>Username:</b> @{user.username if user.username else 'None'}\n"
+        f"<b>Type:</b> {type_info['name']}\n"
+        f"<b>Contact Info:</b> {escape(contact)}\n\n"
+        f"<b>Message:</b>\n{escape(feedback_text)}\n"
+    )
+
+    # Send to all admins
+    success_count = 0
+    for admin_id in ADMIN_IDS:
+        try:
+            # Send text first
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=admin_message,
+                parse_mode=ParseMode.HTML
+            )
+
+            # Forward original message if it has media and we have the info
+            if has_media and feedback_chat_id and feedback_message_id:
+                try:
+                    await context.bot.forward_message(
+                        chat_id=admin_id,
+                        from_chat_id=feedback_chat_id,
+                        message_id=feedback_message_id
+                    )
+                except Exception as e:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=f"⚠️ Could not forward media: {escape(str(e))}"
+                    )
+
+            success_count += 1
+        except Exception as e:
+            logger.error(f"Failed to send feedback to admin {admin_id}: {e}")
+
+    # Log to channel if configured
+    if FEEDBACK_LOG_CHANNEL:
+        try:
+            await context.bot.send_message(
+                chat_id=FEEDBACK_LOG_CHANNEL,
+                text=admin_message,
+                parse_mode=ParseMode.HTML
+            )
+        except Exception as e:
+            logger.error(f"Failed to log feedback to channel: {e}")
+
+    # Store in database
+    try:
+        store_feedback(
+            feedback_id=feedback_id,
+            user_id=user.id,
+            feedback_type=feedback_type,
+            message_text=feedback_text,
+            has_media=has_media,
+            media_info=str(feedback_media),
+            contact_info=contact
+        )
+    except Exception as e:
+        logger.error(f"Failed to store feedback in DB: {e}")
+
+    # Send confirmation to user
+    await query.edit_message_text(
+        f"{fmt_emoji('check', '✅')} <b>Feedback Sent!</b>\n\n"
+        f"Thank you for your {type_info['name'].lower()}. "
+        f"Your feedback has been recorded with ID: <code>{feedback_id}</code>\n\n"
+        f"We appreciate your input in making this bot better! {fmt_emoji('hehe', '😊')}",
+        parse_mode=ParseMode.HTML
+    )
+
+    # Clear feedback data
+    feedback_keys = [
+        "feedback_type", "feedback_text", "feedback_contact",
+        "feedback_has_media", "feedback_message_id", "feedback_chat_id",
+        "feedback_media", "feedback_media_type", "feedback_media_name"
+    ]
+    for key in feedback_keys:
+        context.user_data.pop(key, None)
+
+    return ConversationHandler.END
+
+
+async def feedback_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show feedback statistics (admin only)."""
+    user_id = update.effective_user.id
+
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text(
+            f"{fmt_emoji('cross', '❌')} This command is for admins only.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    # You would need a feedback table in DB to track stats
+    # For now, show placeholder
+    await update.message.reply_text(
+        f"{fmt_emoji('chart', '📊')} <b>Feedback Statistics</b>\n\n"
+        f"<i>Feature coming soon!</i>\n\n"
+        f"Will track:\n"
+        f"• Total feedback received\n"
+        f"• Feedback by type\n"
+        f"• Average response time\n"
+        f"• User satisfaction ratings",
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def reply_feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to reply to feedback."""
+    user_id = update.effective_user.id
+
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text(
+            f"{fmt_emoji('cross', '❌')} This command is for admins only.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            f"{fmt_emoji('cross', '❌')} Usage: /reply <feedback_id> <message>\n\n"
+            f"Example: /reply FB-123456789 Thank you for your feedback!",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    feedback_id = args[0]
+    reply_text = ' '.join(args[1:])
+
+    # Fetch feedback from DB
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT user_id, status FROM feedback WHERE id = ?', (feedback_id,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        await update.message.reply_text(
+            f"{fmt_emoji('cross', '❌')} Feedback ID not found.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    target_user_id, status = row
+
+    # Send reply to user
+    try:
+        await context.bot.send_message(
+            chat_id=target_user_id,
+            text=(
+                f"{fmt_emoji('star', '📝')} <b>Reply to your feedback #{feedback_id}</b>\n\n"
+                f"{escape(reply_text)}\n\n"
+                f"<i>Thank you for helping us improve!</i>"
+            ),
+            parse_mode=ParseMode.HTML
+        )
+
+        # Update feedback status
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('''
+                  UPDATE feedback
+                  SET status        = 'replied',
+                      replied_at    = CURRENT_TIMESTAMP,
+                      reply_message = ?
+                  WHERE id = ?
+                  ''', (reply_text, feedback_id))
+        conn.commit()
+        conn.close()
+
+        await update.message.reply_text(
+            f"{fmt_emoji('check', '✅')} Reply sent to user.",
+            parse_mode=ParseMode.HTML
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to send reply to user {target_user_id}: {e}")
+        await update.message.reply_text(
+            f"{fmt_emoji('cross', '❌')} Failed to send reply: {escape(str(e))}",
+            parse_mode=ParseMode.HTML
+        )
+
+
+async def list_feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List recent feedback (admin only)."""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text(
+            f"{fmt_emoji('cross', '❌')} This command is for admins only.",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+              SELECT id, user_id, feedback_type, status, created_at
+              FROM feedback
+              ORDER BY created_at DESC LIMIT 10
+              ''')
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows:
+        await update.message.reply_text("No feedback found.")
+        return
+
+    text = f"{fmt_emoji('chart', '📋')} <b>Recent Feedback</b>\n\n"
+    for row in rows:
+        fb_id, uid, fb_type, status, created = row
+        created_str = created[:16] if created else "?"
+        text += f"• <code>{fb_id}</code> | {fb_type} | {status} | {created_str}\n"
+
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+from telegram import BotCommand
+async def set_commands(app):
+    """Set bot commands for the command menu."""
+    commands = [
+        BotCommand("start", "Main menu"),
+        BotCommand("help", "Show help"),
+        BotCommand("stats", "Bot statistics"),
+        BotCommand("bot_status", "System status"),
+        BotCommand("feedback", "Send feedback"),
+        BotCommand("check_account", "Check if account exists"),
+        BotCommand("account_info", "Get account details"),
+        BotCommand("bulk_report", "Report multiple targets"),
+        BotCommand("ban", "Ban user (group admins)"),
+        BotCommand("unban", "Unban user (group admins)"),
+        BotCommand("cancel", "Cancel current operation"),
+    ]
+    await app.bot.set_my_commands(commands)
 # -------------------- ADD TO MAIN FUNCTION --------------------
 # -------------------- MAIN --------------------
 def main():
@@ -2131,7 +2649,26 @@ def main():
     )
     application.add_handler(bulk_conv)
 
-    print("Bot started. Press Ctrl+C to stop.")
+    # Feedback conversation
+    feedback_conv = ConversationHandler(
+        entry_points=[CommandHandler("feedback", feedback_command)],
+        states={
+            FEEDBACK_TYPE: [CallbackQueryHandler(feedback_type_callback, pattern="^fb_")],
+            FEEDBACK_TEXT: [
+                MessageHandler(filters.ALL & ~filters.COMMAND, feedback_text_handler)
+            ],
+            FEEDBACK_CONTACT: [CallbackQueryHandler(feedback_contact_callback, pattern="^fb_")],
+            FEEDBACK_CONFIRM: [CallbackQueryHandler(feedback_submit, pattern="^fb_")],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    application.add_handler(feedback_conv)
+    application.add_handler(CommandHandler("reply", reply_feedback_command))
+    application.add_handler(CommandHandler("list_feedback", list_feedback_command))
+
+    application.add_handler(CommandHandler("feedback_stats", feedback_stats_command))
+
+    print("Bot started")
     application.run_polling()
 
 if __name__ == "__main__":
